@@ -13,6 +13,7 @@
     --line:rgba(210,220,235,0.09); --line-strong:rgba(210,220,235,0.18);
     --text:#dfe3ea; --text-dim:#9aa3b2;
     --amber:#c98a2c; --cyan:#4fb3c9;
+    --label-font-size:10px;
     --c-pju:#c98a2c; --c-ref:#5f6a7a; --c-tm:#3f6fa8; --c-listrik:#7c5ba6;
     --c-cctv:#af4a42; --c-telkom:#2f8f82; --c-rambu:#b3941f; --c-lampu:#c1652f;
     --c-billboard:#a1567a; --c-penyangga:#8a6239; --c-anomali:#d1364a;
@@ -102,6 +103,8 @@
   .leaflet-control-attribution{font-size:9px;}
   .leaflet-control-scale-line{background:rgba(22,27,37,0.85) !important;color:var(--text) !important;border-color:var(--line-strong) !important;font-family:var(--f-mono);}
   .ruler-label{background:rgba(22,27,37,0.9);color:#dfe3ea;font-family:var(--f-mono);font-size:11px;padding:2px 6px;border-radius:3px;border:1px solid var(--line-strong);white-space:nowrap;}
+  .leaflet-tooltip.point-label{background:rgba(10,13,19,0.8);border:1px solid var(--line-strong);color:#f0f2f5;font-family:var(--f-mono);font-size:var(--label-font-size,10px);padding:1px 6px;border-radius:3px;box-shadow:none;}
+  .leaflet-tooltip.point-label::before{display:none;}
   @media (max-width:760px){#app{flex-direction:column;}#sidebar{width:100%;min-width:0;max-height:46vh;}#map{flex:1;}}
 </style>
 </head>
@@ -144,6 +147,18 @@
         <input type="range" id="osm-opacity" min="0" max="100" value="70">
       </div>
       <div class="tool-hint">Aktifkan layer OpenStreetMap dari kontrol kanan atas peta untuk melihat overlay ini di atas citra satelit.</div>
+    </div>
+
+    <div class="section">
+      <h2>Label titik</h2>
+      <div class="legend-row" style="padding:0 0 10px;">
+        <div class="left"><span class="label">Tampilkan nama titik</span></div>
+        <label class="switch"><input type="checkbox" id="toggle-labels"><span class="slider"></span></label>
+      </div>
+      <div class="tool-panel-row">
+        <label for="label-size" style="flex-shrink:0;">Ukuran teks</label>
+        <input type="range" id="label-size" min="7" max="18" value="10">
+      </div>
     </div>
 
     <div class="section">
@@ -261,14 +276,24 @@ const GLYPH = {
 
 function makeDivIcon(assetType, isAnomali, isFlagged){
   const cat = CATS[assetType] || { color:"#dfe3ea" };
-  const glyph = GLYPH[assetType] || '<circle cx="12" cy="12" r="4"/>';
-  const size = isAnomali ? 30 : 24;
-  const dash = isAnomali ? 'stroke-dasharray="2.2 1.8"' : '';
-  const flagRing = isFlagged ? `<circle cx="12" cy="12" r="11.4" fill="none" stroke="#ffffff" stroke-width="1.4"/>` : '';
-  const html = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,0.6));">
-      <circle cx="12" cy="12" r="10.6" fill="rgba(10,13,19,0.62)" stroke="${cat.color}" stroke-width="1.5" ${dash}/>
+
+  if (assetType === "PJU" && !isAnomali) {
+    const w = 13, h = 18;
+    const flagRing = isFlagged ? `<ellipse cx="11" cy="27" rx="7" ry="2.6" fill="none" stroke="#ffffff" stroke-width="1.4"/>` : '';
+    const html = `<svg width="${w}" height="${h}" viewBox="0 0 22 30" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,0.6));">
+        <path d="M11 29C11 29 20 17.5 20 10.5A9 9 0 0 0 2 10.5C2 17.5 11 29 11 29Z" fill="#111318" stroke="#ffffff" stroke-width="1"/>
+        <circle cx="11" cy="10.5" r="3.6" fill="#ffffff"/>
+        ${flagRing}
+      </svg>`;
+    return L.divIcon({ html, className:'', iconSize:[w,h], iconAnchor:[w/2,h], popupAnchor:[0,-h] });
+  }
+
+  const size = isAnomali ? 20 : 16;
+  const dash = isAnomali ? 'stroke-dasharray="2 1.6"' : '';
+  const flagRing = isFlagged ? `<circle cx="12" cy="12" r="10.4" fill="none" stroke="#ffffff" stroke-width="1.4"/>` : '';
+  const html = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,0.55));">
       ${flagRing}
-      <g stroke="${cat.color}" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${glyph}</g>
+      <circle cx="12" cy="12" r="7.2" fill="${cat.color}" stroke="#12151c" stroke-width="1.3" ${dash}/>
     </svg>`;
   return L.divIcon({ html, className:'', iconSize:[size,size], iconAnchor:[size/2,size/2], popupAnchor:[0,-size/2] });
 }
@@ -345,12 +370,15 @@ const legendList = document.getElementById('legend-list');
 const orderedKeys = Object.keys(layerGroups).sort((a,b) => a === "PJU" ? -1 : b === "PJU" ? 1 : a.localeCompare(b));
 orderedKeys.forEach(assetType => {
   const cat = CATS[assetType] || { color:"#dfe3ea", label:assetType };
-  const glyph = GLYPH[assetType] || '<circle cx="12" cy="12" r="4"/>';
   const count = layerGroups[assetType].getLayers().length;
   const checked = (assetType !== "Hektometer" && assetType !== "Kilometer") ? "checked" : "";
+  const isPju = assetType === "PJU";
+  const chipSvg = isPju
+    ? `<svg width="12" height="16" viewBox="0 0 22 30"><path d="M11 29C11 29 20 17.5 20 10.5A9 9 0 0 0 2 10.5C2 17.5 11 29 11 29Z" fill="#111318" stroke="#ffffff" stroke-width="1.2"/><circle cx="11" cy="10.5" r="3.6" fill="#ffffff"/></svg>`
+    : `<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.2" fill="${cat.color}" stroke="#12151c" stroke-width="1.3"/></svg>`;
   const row = document.createElement('div');
   row.className = 'legend-row';
-  row.innerHTML = `<div class="left"><div class="sym-chip"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.6" fill="rgba(10,13,19,0.5)" stroke="${cat.color}" stroke-width="1.5"/><g stroke="${cat.color}" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${glyph}</g></svg></div><span class="label">${cat.label}</span></div>
+  row.innerHTML = `<div class="left"><div class="sym-chip">${chipSvg}</div><span class="label">${cat.label}</span></div>
     <div style="display:flex;align-items:center;"><span class="count">${count}</span><label class="switch"><input type="checkbox" data-layer="${assetType}" ${checked}><span class="slider"></span></label></div>`;
   legendList.appendChild(row);
 });
@@ -368,6 +396,28 @@ function refreshStats(){
   document.getElementById('s-other').textContent = currentFeatures.length - currentFeatures.filter(p=>p.asset_type==="PJU"||p.point_category==="Patok Referensi").length;
 }
 refreshStats();
+
+/* =================== LABEL TITIK =================== */
+let labelsOn = false;
+function labelText(p){
+  return p.pju_number ? (`PJU ${p.pju_number} - ${p.segment}`) : (`${p.id} - ${p.segment}`);
+}
+function applyLabelToMarker(m){
+  if (labelsOn) {
+    if (!m.getTooltip()) m.bindTooltip(labelText(m._props), { permanent:true, direction:'top', className:'point-label', offset:[0,-4] });
+    m.openTooltip();
+  } else {
+    if (m.getTooltip()) { m.closeTooltip(); m.unbindTooltip(); }
+  }
+}
+function setLabels(on){
+  labelsOn = on;
+  allMarkers.forEach(applyLabelToMarker);
+}
+document.getElementById('toggle-labels').addEventListener('change', e => setLabels(e.target.checked));
+document.getElementById('label-size').addEventListener('input', e => {
+  document.documentElement.style.setProperty('--label-font-size', e.target.value + 'px');
+});
 
 function populateSelect(id, values){
   const sel = document.getElementById(id);
@@ -459,6 +509,7 @@ function startAddAt(lat, lon){
       allMarkers.push(m);
       if (!layerGroups[assetType]) layerGroups[assetType] = L.layerGroup().addTo(map);
       layerGroups[assetType].addLayer(m);
+      applyLabelToMarker(m);
       addedFeatures.push({ type:'Feature', geometry:{ type:'Point', coordinates:[lon,lat] }, properties: props });
       document.getElementById('add-count').textContent = addedFeatures.length;
       document.getElementById('btn-download-added').disabled = false;
