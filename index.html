@@ -89,7 +89,6 @@
   .footer-note{margin-top:auto;padding:14px 18px;font-size:10px;color:var(--text-dim);border-top:1px solid var(--line);line-height:1.6;font-family:var(--f-mono);}
 
   #map{flex:1;height:100%;background:#0a0d13;cursor:default;}
-  #map.mode-add{cursor:crosshair;}
   #map.mode-ruler{cursor:crosshair;}
   .leaflet-popup-content-wrapper{background:var(--panel);color:var(--text);border-radius:6px;border:1px solid var(--line-strong);}
   .leaflet-popup-tip{background:var(--panel);}
@@ -163,20 +162,10 @@
 
     <div class="section">
       <h2>Alat</h2>
-      <button class="tool-btn" id="btn-add-mode">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        Tambah titik baru
-      </button>
       <button class="tool-btn" id="btn-ruler-mode">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17L17 3M6 12l2 2M10 8l2 2M14 4l2 2"/><path d="M3 17v4h4" /></svg>
         Alat ukur jarak
       </button>
-
-      <div class="tool-panel" id="add-panel" style="display:none;">
-        <div class="tool-hint">Klik area kosong di peta untuk menempatkan titik baru. Kalau area padat titik, geser/zoom dulu supaya ada ruang kosong untuk diklik.</div>
-        <div class="tool-hint" style="margin-top:8px;">Titik baru sesi ini: <b id="add-count" style="color:var(--text);">0</b></div>
-        <button class="download-btn" id="btn-download-added" disabled>Unduh titik baru (.geojson)</button>
-      </div>
 
       <div class="tool-panel" id="ruler-panel" style="display:none;">
         <div class="tool-hint">Klik titik-titik di peta secara berurutan. Klik dekat suatu aset akan otomatis snap ke koordinat aset tersebut.</div>
@@ -338,12 +327,6 @@ let allMarkers = [];
    di area padat, karena klik pada marker tidak diteruskan ke mode aktif. */
 function attachMarkerRouter(m){
   m.on('click', function(e){
-    if (addMode) {
-      L.DomEvent.stopPropagation(e);
-      const ll = m.getLatLng();
-      startAddAt(ll.lat, ll.lng);
-      return;
-    }
     if (rulerMode) {
       L.DomEvent.stopPropagation(e);
       const ll = m.getLatLng();
@@ -447,92 +430,16 @@ function applyFilters(){
 document.getElementById('f-search').addEventListener('input', applyFilters);
 
 /* =================== MODE GLOBAL =================== */
-let addMode = false;
 let rulerMode = false;
 const mapEl = document.getElementById('map');
 
-function setAddMode(on){
-  addMode = on;
-  if (on) setRulerMode(false);
-  document.getElementById('btn-add-mode').classList.toggle('active', on);
-  document.getElementById('add-panel').style.display = on ? 'block' : 'none';
-  mapEl.classList.toggle('mode-add', on);
-}
-document.getElementById('btn-add-mode').addEventListener('click', () => setAddMode(!addMode));
-
 function setRulerMode(on){
   rulerMode = on;
-  if (on) setAddMode(false);
   document.getElementById('btn-ruler-mode').classList.toggle('active', on);
   document.getElementById('ruler-panel').style.display = on ? 'block' : 'none';
   mapEl.classList.toggle('mode-ruler', on);
 }
 document.getElementById('btn-ruler-mode').addEventListener('click', () => setRulerMode(!rulerMode));
-
-/* =================== TAMBAH TITIK =================== */
-let addedFeatures = [];
-let addedCounter = 1;
-const ASSET_OPTIONS = Object.keys(CATS).filter(k => k !== "ANOMALI - Tidak Ada Tiang");
-
-function startAddAt(lat, lon){
-  const tempMarker = L.marker([lat, lon], { icon: makeDivIcon("PJU", false) }).addTo(map);
-  const formId = 'form-' + Date.now();
-  const optionsHtml = ASSET_OPTIONS.map(k => `<option value="${k}">${CATS[k].label}</option>`).join('');
-  const popupHtml = `
-    <div class="popup-form">
-      <div class="popup-title">Titik baru</div>
-      <label>Jenis aset</label>
-      <select id="${formId}-type">${optionsHtml}</select>
-      <label>Segmen</label>
-      <input type="text" id="${formId}-segment" placeholder="contoh: S43">
-      <label>Catatan</label>
-      <input type="text" id="${formId}-note" placeholder="opsional">
-      <button id="${formId}-save">Simpan titik</button>
-    </div>`;
-  tempMarker.bindPopup(popupHtml, { minWidth:200 }).openPopup();
-  tempMarker.on('popupopen', () => {
-    document.getElementById(formId + '-save').addEventListener('click', () => {
-      const assetType = document.getElementById(formId + '-type').value;
-      const segment = document.getElementById(formId + '-segment').value.trim() || 'Belum ditentukan';
-      const note = document.getElementById(formId + '-note').value.trim();
-      const id = 'BARU-' + String(addedCounter++).padStart(3, '0');
-      const props = {
-        id, name_original: note || `Titik manual ${id}`, source_team: 'Tambahan manual',
-        segment, point_category: 'Tiang/Aset', asset_type: assetType,
-        pju_number: null, box_panel: false, elevation: null, survey_time: new Date().toISOString(),
-        latitude: lat, longitude: lon
-      };
-      map.removeLayer(tempMarker);
-      const m = L.marker([lat, lon], { icon: makeDivIcon(assetType, false) }).bindPopup(popupContent(props));
-      m._props = props;
-      attachMarkerRouter(m);
-      allMarkers.push(m);
-      if (!layerGroups[assetType]) layerGroups[assetType] = L.layerGroup().addTo(map);
-      layerGroups[assetType].addLayer(m);
-      applyLabelToMarker(m);
-      addedFeatures.push({ type:'Feature', geometry:{ type:'Point', coordinates:[lon,lat] }, properties: props });
-      document.getElementById('add-count').textContent = addedFeatures.length;
-      document.getElementById('btn-download-added').disabled = false;
-      refreshStats();
-      setAddMode(false);
-    });
-  });
-}
-
-map.on('click', function(e){
-  if (!addMode) return;
-  startAddAt(e.latlng.lat, e.latlng.lng);
-});
-
-document.getElementById('btn-download-added').addEventListener('click', () => {
-  const fc = { type:'FeatureCollection', features: addedFeatures };
-  const blob = new Blob([JSON.stringify(fc, null, 2)], { type:'application/geo+json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'titik_pju_tambahan.geojson';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-});
 
 /* =================== ALAT UKUR (dengan snap) =================== */
 let rulerPoints = [];
